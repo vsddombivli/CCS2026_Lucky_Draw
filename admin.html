@@ -55,6 +55,17 @@
   .logout-bar { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-bottom: 12px; }
   .logout-bar button { width: auto; padding: 8px 16px; font-size: 13px; }
   .slot-count { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+  .chevron { font-size: 14px; color: var(--muted); }
+  .card-body { margin-top: 12px; }
+  .card-body.collapsed { display: none; }
+  .graph-row { display: flex; gap: 16px; margin-top: 12px; }
+  .graph-block { flex: 1; }
+  .graph-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .graph-bar { background: #f1e6d6; border: 1px solid var(--border); border-radius: 8px; height: 14px; overflow: hidden; }
+  .graph-fill { height: 100%; width: 0%; transition: width 0.4s ease; border-radius: 8px 0 0 8px; }
+  .claims-fill { background: #d9a444; }
+  .prizes-fill { background: var(--primary); }
   .live-dot { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 12px; }
   .live-dot.ok { color: var(--success); background: #e8f5e9; }
   .live-dot.err { color: var(--danger); background: #fdecea; }
@@ -175,14 +186,37 @@
     const remaining = Math.max(loc.lucky_draw_count - loc.prizes_awarded, 0);
     setText(`claims-${loc.id}`, loc.claims_so_far);
     setText(`awarded-${loc.id}`, loc.prizes_awarded);
-    setText(`target-${loc.id}`, loc.lucky_draw_count);
+    setText(`target-label-${loc.id}`, loc.lucky_draw_count);
+    setText(`expected-label-${loc.id}`, loc.expected_total_claims);
     setText(`remaining-${loc.id}`, remaining);
     setText(`odds-${loc.id}`, computeLiveOdds(loc));
+    setWidth(`claims-bar-${loc.id}`, barPct(loc.claims_so_far, loc.expected_total_claims));
+    setWidth(`prizes-bar-${loc.id}`, barPct(loc.prizes_awarded, loc.lucky_draw_count));
 
     // briefly flash the card so the admin notices which location just moved
     const card = document.getElementById(`loc-card-${loc.id}`);
     card.classList.add('flash');
     setTimeout(() => card.classList.remove('flash'), 600);
+  }
+
+  // Percentage for a fill bar. Claims can run past the expected estimate
+  // (that's the whole point of the live-odds formula), so this is capped
+  // at 100% visually rather than overflowing the bar.
+  function barPct(value, total) {
+    if (!total || total <= 0) return value > 0 ? 100 : 0;
+    return Math.min((value / total) * 100, 100);
+  }
+
+  function setWidth(id, pct) {
+    const el = document.getElementById(id);
+    if (el) el.style.width = pct + '%';
+  }
+
+  function toggleCard(id) {
+    const body = document.getElementById(`card-body-${id}`);
+    const chevron = document.getElementById(`chevron-${id}`);
+    const collapsed = body.classList.toggle('collapsed');
+    chevron.textContent = collapsed ? '▸' : '▾';
   }
 
   function setText(id, value) {
@@ -237,37 +271,50 @@
       div.className = 'card';
       div.id = `loc-card-${loc.id}`;
       div.innerHTML = `
-        <h3 style="margin-top:0">${escapeHtml(loc.name)}</h3>
-        <div class="row">
-          <div>
-            <label>Prize Target (lucky draws)</label>
-            <input type="number" min="0" id="count-${loc.id}" value="${loc.lucky_draw_count}" />
+        <div class="card-header" onclick="toggleCard('${loc.id}')">
+          <h3 style="margin:0">${escapeHtml(loc.name)}</h3>
+          <span class="chevron" id="chevron-${loc.id}">▾</span>
+        </div>
+
+        <div class="graph-row">
+          <div class="graph-block">
+            <div class="graph-label">Claims <span id="claims-${loc.id}">${loc.claims_so_far}</span> / <span id="expected-label-${loc.id}">${loc.expected_total_claims}</span></div>
+            <div class="graph-bar"><div class="graph-fill claims-fill" id="claims-bar-${loc.id}" style="width:${barPct(loc.claims_so_far, loc.expected_total_claims)}%"></div></div>
           </div>
-          <div>
-            <label>Expected Total Claims</label>
-            <input type="number" min="0" id="expected-${loc.id}" value="${loc.expected_total_claims}" />
+          <div class="graph-block">
+            <div class="graph-label">Prizes <span id="awarded-${loc.id}">${loc.prizes_awarded}</span> / <span id="target-label-${loc.id}">${loc.lucky_draw_count}</span></div>
+            <div class="graph-bar"><div class="graph-fill prizes-fill" id="prizes-bar-${loc.id}" style="width:${barPct(loc.prizes_awarded, loc.lucky_draw_count)}%"></div></div>
           </div>
         </div>
-        <div class="row">
-          <div>
-            <label>Start Time</label>
-            <input type="datetime-local" id="start-${loc.id}" value="${toLocalInput(loc.start_time)}" />
-          </div>
-          <div>
-            <label>End Time</label>
-            <input type="datetime-local" id="end-${loc.id}" value="${toLocalInput(loc.end_time)}" />
-          </div>
-        </div>
-        <button onclick="saveLocation('${loc.id}')">Save Settings</button>
         <div class="slot-count">
-          Claims so far: <span id="claims-${loc.id}">${loc.claims_so_far}</span> &nbsp;|&nbsp;
-          Prizes awarded: <span id="awarded-${loc.id}">${loc.prizes_awarded}</span> / <span id="target-${loc.id}">${loc.lucky_draw_count}</span> &nbsp;|&nbsp;
-          Prizes remaining: <span id="remaining-${loc.id}">${remaining}</span>
-        </div>
-        <div class="slot-count" style="margin-top:2px;">
+          Prizes remaining: <span id="remaining-${loc.id}">${remaining}</span> &nbsp;|&nbsp;
           Live win odds right now: <span id="odds-${loc.id}">${computeLiveOdds(loc)}</span>
         </div>
-        <div id="loc-status-${loc.id}" class="status"></div>
+
+        <div class="card-body" id="card-body-${loc.id}">
+          <div class="row">
+            <div>
+              <label>Prize Target (lucky draws)</label>
+              <input type="number" min="0" id="count-${loc.id}" value="${loc.lucky_draw_count}" />
+            </div>
+            <div>
+              <label>Expected Total Claims</label>
+              <input type="number" min="0" id="expected-${loc.id}" value="${loc.expected_total_claims}" />
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Start Time</label>
+              <input type="datetime-local" id="start-${loc.id}" value="${toLocalInput(loc.start_time)}" />
+            </div>
+            <div>
+              <label>End Time</label>
+              <input type="datetime-local" id="end-${loc.id}" value="${toLocalInput(loc.end_time)}" />
+            </div>
+          </div>
+          <button onclick="saveLocation('${loc.id}')">Save Settings</button>
+          <div id="loc-status-${loc.id}" class="status"></div>
+        </div>
       `;
       container.appendChild(div);
       locationCache[loc.id] = loc;
