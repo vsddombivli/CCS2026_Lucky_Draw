@@ -141,6 +141,25 @@
   .reveal.win { color: var(--gold); text-shadow: 0 0 16px rgba(240,192,90,0.6); }
   .reveal.lose { color: var(--muted); }
   .reveal-emoji { font-size: 56px; margin-top: 10px; }
+
+  /* Gift box screen now fills the entire viewport instead of a small
+     card, per request — background image is fully covered. */
+  #giftbox-screen { padding: 0; justify-content: center; }
+  #giftbox-screen .card {
+    max-width: none; width: 100vw; height: 100vh; border-radius: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+  #giftbox-screen .card::before { content: none; }
+
+  @keyframes confetti-fall {
+    0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+    100% { transform: translateY(110vh) rotate(720deg); opacity: 0.9; }
+  }
+  .confetti-piece {
+    position: fixed; top: 0; width: 8px; height: 14px; z-index: 50;
+    pointer-events: none; animation: confetti-fall linear forwards;
+  }
 </style>
 </head>
 <body>
@@ -185,7 +204,7 @@
   </div>
   <div class="card">
     <h1 id="giftbox-do-label">DO0042</h1>
-    <p class="sub">Tap the gift box!</p>
+    <p class="sub" id="giftbox-sub">Tap the gift box!</p>
     <div id="gift-box" class="gift-box" onclick="openGiftBox()">🎁</div>
     <div id="reveal-area"></div>
     <div id="giftbox-status" class="status"></div>
@@ -306,13 +325,13 @@
         return;
       }
       if (now < start) {
-        el.textContent = 'Draw window closed at ' + end.toLocaleTimeString();
+        el.textContent = 'Draw window starts at ' + start.toLocaleString();
         el.className = 'countdown';
         submitBtn.disabled = true;
         return;
       }
       if (now > end) {
-        el.textContent = 'Draw window closed at ' + end.toLocaleTimeString();
+        el.textContent = 'Draw window closed at ' + end.toLocaleString();
         el.className = 'countdown closed';
         submitBtn.disabled = true;
         clearInterval(countdownTimer);
@@ -394,7 +413,9 @@
     document.getElementById('giftbox-do-label').textContent = currentDoNumber;
     document.getElementById('gift-box').textContent = '🎁';
     document.getElementById('gift-box').classList.remove('opened');
+    document.getElementById('gift-box').style.display = '';
     document.getElementById('gift-box').style.pointerEvents = 'auto';
+    document.getElementById('giftbox-sub').classList.remove('hidden');
     document.getElementById('reveal-area').innerHTML = '';
     document.getElementById('giftbox-status').className = 'status';
     document.getElementById('giftbox-status').textContent = '';
@@ -428,14 +449,15 @@
     }
 
     box.classList.add('opened');
-    box.textContent = '📦';
+    box.style.display = 'none';
+    document.getElementById('giftbox-sub').classList.add('hidden');
 
     const revealArea = document.getElementById('reveal-area');
     if (result.result === 'win') {
       revealArea.innerHTML = `
-        <div class="reveal-emoji">🎉</div>
         <div class="reveal win">JACKPOT!</div>
       `;
+      launchConfetti();
     } else if (result.result === 'lose') {
       revealArea.innerHTML = `
         <div class="reveal-emoji">🙂</div>
@@ -449,6 +471,20 @@
     }
 
     document.getElementById('try-another-btn').classList.remove('hidden');
+  }
+
+  function launchConfetti() {
+    const colors = ['#f0c05a', '#b5401f', '#7fdb8a', '#ffffff', '#c8962a'];
+    for (let i = 0; i < 40; i++) {
+      const piece = document.createElement('div');
+      piece.className = 'confetti-piece';
+      piece.style.left = Math.random() * 100 + 'vw';
+      piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+      piece.style.animationDuration = (2 + Math.random() * 1.5) + 's';
+      piece.style.animationDelay = (Math.random() * 0.4) + 's';
+      document.body.appendChild(piece);
+      setTimeout(() => piece.remove(), 4000);
+    }
   }
 
   function resetToDoScreen() {
