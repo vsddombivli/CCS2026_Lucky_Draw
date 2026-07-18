@@ -163,7 +163,7 @@
 </style>
 </head>
 <body>
-<div class="bg-layer"><img src="bg.jpeg" alt="" /></div>
+<div class="bg-layer"><img src="bg.png" alt="" /></div>
 
 
 <!-- LOGIN SCREEN -->
@@ -238,7 +238,7 @@
       .channel('volunteer-location-live')
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'locations', filter: `id=eq.${currentLocation.id}` },
-        (payload) => { currentLocation = payload.new; }
+        (payload) => { currentLocation = { ...payload.new, master_locations: currentLocation?.master_locations }; }
       )
       .subscribe();
   }
@@ -257,7 +257,7 @@
     }
 
     const { data: profile, error: profileErr } = await sb
-      .from('profiles').select('*, locations(*)').eq('id', data.user.id).single();
+      .from('profiles').select('*, locations(*, master_locations(*))').eq('id', data.user.id).single();
 
     if (profileErr || !profile || profile.role !== 'volunteer' || !profile.location_id) {
       statusEl.className = 'status err';
@@ -303,7 +303,7 @@
     // regardless of setup.
     refetchTimer = setInterval(async () => {
       if (!currentLocation) return;
-      const { data, error } = await sb.from('locations').select('*').eq('id', currentLocation.id).single();
+      const { data, error } = await sb.from('locations').select('*, master_locations(*)').eq('id', currentLocation.id).single();
       if (error) {
         console.error('Location refetch failed — check that this volunteer profile\'s location_id matches the row you are editing in admin:', error);
         return;
@@ -354,10 +354,11 @@
   // 9999 registrations at a single location.
   const DO_DIGIT_WIDTH = 4;
   function normalizeDoNumber(input) {
+    const prefix = currentLocation?.master_locations?.do_prefix || 'DO';
     const raw = input.trim().toUpperCase();
-    const digitsOnly = raw.replace(/^DO/, '');
-    if (!/^\d+$/.test(digitsOnly)) return null; // not a plain number, not a DO+number — reject
-    return 'DO' + digitsOnly.padStart(DO_DIGIT_WIDTH, '0');
+    const digitsOnly = raw.replace(/^[A-Z]+/, ''); // strip any leading letters, not just 'DO'
+    if (!/^\d+$/.test(digitsOnly)) return null; // not a plain number, not a prefix+number — reject
+    return prefix + digitsOnly.padStart(DO_DIGIT_WIDTH, '0');
   }
 
   async function submitDoNumber() {
@@ -497,7 +498,7 @@
     const { data: { session } } = await sb.auth.getSession();
     if (session) {
       const { data: profile } = await sb
-        .from('profiles').select('*, locations(*)').eq('id', session.user.id).single();
+        .from('profiles').select('*, locations(*, master_locations(*))').eq('id', session.user.id).single();
       if (profile && profile.role === 'volunteer' && profile.location_id) {
         currentProfile = profile;
         currentLocation = profile.locations;
