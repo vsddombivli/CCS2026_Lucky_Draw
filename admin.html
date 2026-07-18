@@ -71,6 +71,20 @@
   .live-dot.err { color: var(--danger); background: #fdecea; }
   @keyframes cardFlash { 0% { box-shadow: 0 0 0 3px rgba(181,64,31,0.5); } 100% { box-shadow: none; } }
   .card.flash { animation: cardFlash 0.6s ease-out; }
+  .do-grid-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .do-grid-header button { width: auto; padding: 8px 16px; margin-top: 0; }
+  .do-grid {
+    display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px;
+  }
+  .do-cell {
+    aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); border-radius: 6px; font-size: 11px;
+    background: #fff; color: var(--muted);
+  }
+  .do-cell.win { background: #2e7d32; color: white; border-color: #2e7d32; font-weight: 700; }
+  .do-cell.lose { background: #d9822b; color: white; border-color: #d9822b; font-weight: 700; }
+  .do-grid-legend { display: flex; gap: 16px; margin-bottom: 14px; font-size: 13px; color: var(--muted); align-items: center; }
+  .legend-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
 </style>
 </head>
 <body>
@@ -107,6 +121,20 @@
     </div>
 
     <div id="locations-list"></div>
+  </div>
+
+  <!-- DO NUMBER GRID -->
+  <div id="do-grid-screen" class="hidden">
+    <div class="do-grid-header">
+      <h1 id="do-grid-title" style="margin:0">DO Numbers</h1>
+      <button class="secondary" onclick="hideDoGrid()">Back to Dashboard</button>
+    </div>
+    <div class="do-grid-legend">
+      <span><span class="legend-swatch" style="background:#fff;border:1px solid var(--border)"></span>Not attempted</span>
+      <span><span class="legend-swatch" style="background:#2e7d32"></span>Jackpot</span>
+      <span><span class="legend-swatch" style="background:#d9822b"></span>No win</span>
+    </div>
+    <div id="do-grid" class="do-grid"></div>
   </div>
 
 </div>
@@ -312,7 +340,14 @@
               <input type="datetime-local" id="end-${loc.id}" value="${toLocalInput(loc.end_time)}" />
             </div>
           </div>
+          <div class="row">
+            <div>
+              <label>Max DO Number (blank = no limit)</label>
+              <input type="number" min="1" id="maxdo-${loc.id}" value="${loc.max_do_number ?? ''}" />
+            </div>
+          </div>
           <button onclick="saveLocation('${loc.id}')">Save Settings</button>
+          <button class="secondary" onclick="showDoGrid('${loc.id}')">View DO Grid</button>
           <div id="loc-status-${loc.id}" class="status"></div>
         </div>
       `;
@@ -326,6 +361,8 @@
     const expected = parseInt(document.getElementById(`expected-${id}`).value, 10) || 0;
     const start = document.getElementById(`start-${id}`).value;
     const end = document.getElementById(`end-${id}`).value;
+    const maxDoRaw = document.getElementById(`maxdo-${id}`).value;
+    const maxDo = maxDoRaw === '' ? null : parseInt(maxDoRaw, 10);
     const statusEl = document.getElementById(`loc-status-${id}`);
     statusEl.className = 'status'; statusEl.textContent = '';
 
@@ -336,7 +373,8 @@
       lucky_draw_count: count,
       expected_total_claims: expected,
       start_time: start ? new Date(start).toISOString() : null,
-      end_time: end ? new Date(end).toISOString() : null
+      end_time: end ? new Date(end).toISOString() : null,
+      max_do_number: maxDo
     }).eq('id', id).select();
 
     if (!error && (!updatedRows || updatedRows.length === 0)) {
@@ -364,7 +402,8 @@
       lucky_draw_count: count,
       expected_total_claims: expected,
       start_time: start ? new Date(start).toISOString() : null,
-      end_time: end ? new Date(end).toISOString() : null
+      end_time: end ? new Date(end).toISOString() : null,
+      max_do_number: maxDo
     });
   }
 
@@ -376,6 +415,52 @@
     const remainingExpected = Math.max(loc.expected_total_claims - loc.claims_so_far, remainingPrizes);
     const p = Math.min(remainingPrizes / remainingExpected, 1);
     return (p * 100).toFixed(1) + '%';
+  }
+
+  async function showDoGrid(locationId) {
+    const loc = locationCache[locationId];
+    if (!loc) return;
+    if (!loc.max_do_number) {
+      alert('Set a Max DO Number for this location first, then Save Settings.');
+      return;
+    }
+
+    document.getElementById('admin-screen').classList.add('hidden');
+    document.getElementById('do-grid-screen').classList.remove('hidden');
+    document.getElementById('do-grid-title').textContent = `DO Numbers — ${loc.name}`;
+
+    const gridEl = document.getElementById('do-grid');
+    gridEl.innerHTML = 'Loading…';
+
+    // do_number is stored as e.g. "DO0042" — map numeric part -> result
+    const { data: rows, error } = await sb
+      .from('participations')
+      .select('do_number, result')
+      .eq('location_id', locationId);
+
+    if (error) {
+      gridEl.innerHTML = '<div class="status err">' + error.message + '</div>';
+      return;
+    }
+
+    const resultByNumber = {};
+    for (const row of rows) {
+      const n = parseInt(row.do_number.replace(/\D/g, ''), 10);
+      resultByNumber[n] = row.result;
+    }
+
+    let html = '';
+    for (let n = 1; n <= loc.max_do_number; n++) {
+      const result = resultByNumber[n];
+      const cls = result === 'win' ? 'win' : result === 'lose' ? 'lose' : '';
+      html += `<div class="do-cell ${cls}">${n}</div>`;
+    }
+    gridEl.innerHTML = html;
+  }
+
+  function hideDoGrid() {
+    document.getElementById('do-grid-screen').classList.add('hidden');
+    document.getElementById('admin-screen').classList.remove('hidden');
   }
 
   function toLocalInput(iso) {
