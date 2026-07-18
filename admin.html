@@ -109,18 +109,36 @@
       <span id="live-status" class="live-dot">● Connecting…</span>
       <button class="secondary" onclick="doLogout()">Log Out</button>
     </div>
-    <h1>Lucky Draw Setup</h1>
-    <p class="sub">Set prize target, expected claims, and time window per location. Odds recalculate live on every claim — no generation step, and you can edit these numbers mid-event.</p>
+    <h1>Lucky Draw Setup — <span id="master-name-label"></span></h1>
+    <p class="sub">Prize target, expected claims, and time window are per sub-location below. Max DO Number is set once for the whole city here and applies across every sub-location.</p>
 
     <div class="card">
-      <h3 style="margin-top:0">Add Location</h3>
-      <label>Location Name</label>
+      <h3 style="margin-top:0">City Settings</h3>
+      <div class="row">
+        <div>
+          <label>DO Prefix (fixed — do not change mid-event)</label>
+          <input id="master-prefix" disabled />
+        </div>
+        <div>
+          <label>Max DO Number (city-wide)</label>
+          <input type="number" min="1" id="master-maxdo" />
+        </div>
+      </div>
+      <button onclick="saveMasterLocation()">Save City Settings</button>
+      <button class="secondary" onclick="showDoGrid()">View DO Grid</button>
+      <div id="master-status" class="status"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Add Sub-Location</h3>
+      <label>Sub-Location Name</label>
       <input id="new-loc-name" placeholder="e.g. SMPT" />
-      <button onclick="addLocation()">Add Location</button>
+      <button onclick="addLocation()">Add Sub-Location</button>
       <div id="add-loc-status" class="status"></div>
     </div>
 
     <div id="locations-list"></div>
+
   </div>
 
   <!-- DO NUMBER GRID -->
@@ -140,7 +158,7 @@
 </div>
 
 <script>
-  // ====== CONFIGURE THESE ======
+ // ====== CONFIGURE THESE ======
   const SUPABASE_URL = "https://npaikbbvarcsxykmogeo.supabase.co";
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wYWlrYmJ2YXJjc3h5a21vZ2VvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzNTcxNzIsImV4cCI6MjA5OTkzMzE3Mn0.zwIfRfHttsYmATkl751GWa1VJE2qUgN5Jxq53tNYSpM";
   // ==============================
@@ -149,6 +167,7 @@
 
   const locationCache = {}; // id -> latest known location row, kept in sync by realtime
   let realtimeChannel = null;
+  let currentMaster = null; // this admin's city row (master_locations)
 
   async function doLogin() {
     const email = document.getElementById('login-email').value.trim();
@@ -169,11 +188,18 @@
       await sb.auth.signOut();
       return;
     }
+    if (!profile.master_locations) {
+      statusEl.className = 'status err';
+      statusEl.textContent = 'This admin account has no city (master_location_id) assigned yet — set it in Supabase first.';
+      await sb.auth.signOut();
+      return;
+    }
+    currentMaster = profile.master_locations;
     showAdmin();
   }
 
   async function getProfile(userId) {
-    const { data, error } = await sb.from('profiles').select('*').eq('id', userId).single();
+    const { data, error } = await sb.from('profiles').select('*, master_locations(*)').eq('id', userId).single();
     if (error) return null;
     return data;
   }
@@ -187,8 +213,37 @@
   async function showAdmin() {
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('admin-screen').classList.remove('hidden');
+    document.getElementById('master-name-label').textContent = currentMaster.name;
+    document.getElementById('master-prefix').value = currentMaster.do_prefix;
+    document.getElementById('master-maxdo').value = currentMaster.max_do_number ?? '';
     await loadLocations();
     subscribeRealtime();
+  }
+
+  async function saveMasterLocation() {
+    const maxDoRaw = document.getElementById('master-maxdo').value;
+    const maxDo = maxDoRaw === '' ? null : parseInt(maxDoRaw, 10);
+    const statusEl = document.getElementById('master-status');
+    statusEl.className = 'status'; statusEl.textContent = '';
+
+    const { data, error } = await sb.from('master_locations')
+      .update({ max_do_number: maxDo })
+      .eq('id', currentMaster.id)
+      .select();
+
+    if (error) {
+      statusEl.className = 'status err';
+      statusEl.textContent = error.message;
+      return;
+    }
+    if (!data || data.length === 0) {
+      statusEl.className = 'status err';
+      statusEl.textContent = 'Update matched 0 rows — check this admin profile is linked to this city via master_location_id.';
+      return;
+    }
+    currentMaster = data[0];
+    statusEl.className = 'status ok';
+    statusEl.textContent = 'Saved.';
   }
 
   // Subscribes once to ALL location row updates (every claim anywhere
@@ -200,7 +255,7 @@
     realtimeChannel = sb
       .channel('admin-locations-live')
       .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'locations' },
+        { event: 'UPDATE', schema: 'public', table: 'locations', filter: `master_location_id=eq.${currentMaster.id}` },
         (payload) => applyLiveUpdate(payload.new)
       )
       .subscribe((status) => setLiveStatus(status));
@@ -272,7 +327,7 @@
     const statusEl = document.getElementById('add-loc-status');
     statusEl.className = 'status'; statusEl.textContent = '';
     if (!name) return;
-    const { error } = await sb.from('locations').insert({ name });
+    const { error } = await sb.from('locations').insert({ name, master_location_id: currentMaster.id });
     if (error) {
       statusEl.className = 'status err';
       statusEl.textContent = error.message;
@@ -285,7 +340,7 @@
   }
 
   async function loadLocations() {
-    const { data: locations, error } = await sb.from('locations').select('*').order('name');
+    const { data: locations, error } = await sb.from('locations').select('*').eq('master_location_id', currentMaster.id).order('name');
     const container = document.getElementById('locations-list');
     container.innerHTML = '';
     if (error) {
@@ -340,14 +395,7 @@
               <input type="datetime-local" id="end-${loc.id}" value="${toLocalInput(loc.end_time)}" />
             </div>
           </div>
-          <div class="row">
-            <div>
-              <label>Max DO Number (blank = no limit)</label>
-              <input type="number" min="1" id="maxdo-${loc.id}" value="${loc.max_do_number ?? ''}" />
-            </div>
-          </div>
           <button onclick="saveLocation('${loc.id}')">Save Settings</button>
-          <button class="secondary" onclick="showDoGrid('${loc.id}')">View DO Grid</button>
           <div id="loc-status-${loc.id}" class="status"></div>
         </div>
       `;
@@ -361,8 +409,6 @@
     const expected = parseInt(document.getElementById(`expected-${id}`).value, 10) || 0;
     const start = document.getElementById(`start-${id}`).value;
     const end = document.getElementById(`end-${id}`).value;
-    const maxDoRaw = document.getElementById(`maxdo-${id}`).value;
-    const maxDo = maxDoRaw === '' ? null : parseInt(maxDoRaw, 10);
     const statusEl = document.getElementById(`loc-status-${id}`);
     statusEl.className = 'status'; statusEl.textContent = '';
 
@@ -373,8 +419,7 @@
       lucky_draw_count: count,
       expected_total_claims: expected,
       start_time: start ? new Date(start).toISOString() : null,
-      end_time: end ? new Date(end).toISOString() : null,
-      max_do_number: maxDo
+      end_time: end ? new Date(end).toISOString() : null
     }).eq('id', id).select();
 
     if (!error && (!updatedRows || updatedRows.length === 0)) {
@@ -402,8 +447,7 @@
       lucky_draw_count: count,
       expected_total_claims: expected,
       start_time: start ? new Date(start).toISOString() : null,
-      end_time: end ? new Date(end).toISOString() : null,
-      max_do_number: maxDo
+      end_time: end ? new Date(end).toISOString() : null
     });
   }
 
@@ -417,26 +461,32 @@
     return (p * 100).toFixed(1) + '%';
   }
 
-  async function showDoGrid(locationId) {
-    const loc = locationCache[locationId];
-    if (!loc) return;
-    if (!loc.max_do_number) {
-      alert('Set a Max DO Number for this location first, then Save Settings.');
+  async function showDoGrid() {
+    if (!currentMaster.max_do_number) {
+      alert('Set a Max DO Number for this city first, then Save City Settings.');
       return;
     }
 
     document.getElementById('admin-screen').classList.add('hidden');
     document.getElementById('do-grid-screen').classList.remove('hidden');
-    document.getElementById('do-grid-title').textContent = `DO Numbers — ${loc.name}`;
+    document.getElementById('do-grid-title').textContent = `DO Numbers — ${currentMaster.name}`;
 
     const gridEl = document.getElementById('do-grid');
     gridEl.innerHTML = 'Loading…';
 
-    // do_number is stored as e.g. "DO0042" — map numeric part -> result
+    // All sub-locations under this city, then all participations across them.
+    const { data: subLocations, error: subLocError } = await sb
+      .from('locations').select('id').eq('master_location_id', currentMaster.id);
+    if (subLocError) {
+      gridEl.innerHTML = '<div class="status err">' + subLocError.message + '</div>';
+      return;
+    }
+    const subLocationIds = (subLocations || []).map(l => l.id);
+
     const { data: rows, error } = await sb
       .from('participations')
       .select('do_number, result')
-      .eq('location_id', locationId);
+      .in('location_id', subLocationIds);
 
     if (error) {
       gridEl.innerHTML = '<div class="status err">' + error.message + '</div>';
@@ -450,7 +500,7 @@
     }
 
     let html = '';
-    for (let n = 1; n <= loc.max_do_number; n++) {
+    for (let n = 1; n <= currentMaster.max_do_number; n++) {
       const result = resultByNumber[n];
       const cls = result === 'win' ? 'win' : result === 'lose' ? 'lose' : '';
       html += `<div class="do-cell ${cls}">${n}</div>`;
@@ -481,7 +531,8 @@
     const { data: { session } } = await sb.auth.getSession();
     if (session) {
       const profile = await getProfile(session.user.id);
-      if (profile && profile.role === 'admin') {
+      if (profile && profile.role === 'admin' && profile.master_locations) {
+        currentMaster = profile.master_locations;
         showAdmin();
       }
     }
