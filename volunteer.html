@@ -27,18 +27,23 @@
     color: var(--text);
   }
   body {
-    background-image:
-      linear-gradient(180deg, rgba(8,10,26,0.55) 0%, rgba(20,10,10,0.45) 45%, rgba(10,6,6,0.82) 100%),
-      url('bg.png');
-    background-size: cover;
-    background-position: center top;
-    background-attachment: fixed;
-    background-repeat: no-repeat;
+    background-color: #150c08; /* fallback tone matching the image's bottom fade, shown briefly before bg.png loads or if it fails */
+  }
+  .bg-layer {
+    position: fixed; inset: 0; z-index: -1; overflow: hidden;
+  }
+  .bg-layer img {
+    width: 100%; height: 100%; object-fit: cover; object-position: center bottom;
+  }
+  .bg-layer::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(8,10,26,0.55) 0%, rgba(20,10,10,0.45) 45%, rgba(10,6,6,0.82) 100%);
   }
   .screen {
     min-height: 100vh; display: flex; flex-direction: column;
     align-items: center; justify-content: flex-end; padding: 20px;
-    padding-bottom: 8vh;
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
   }
   .hidden { display: none !important; }
   .card {
@@ -139,6 +144,8 @@
 </style>
 </head>
 <body>
+<div class="bg-layer"><img src="bg.png" alt="" /></div>
+
 
 <!-- LOGIN SCREEN -->
 <div id="login-screen" class="screen">
@@ -163,7 +170,7 @@
   <div class="card">
     <h1>Enter DO Number</h1>
     <p class="sub">Type the registration number to check eligibility</p>
-    <input id="do-number" type="text" placeholder="e.g. DO0042" autocomplete="off" />
+    <input id="do-number" type="text" inputmode="numeric" placeholder="e.g. 42 or DO0042" autocomplete="off" />
     <button id="do-submit-btn" onclick="submitDoNumber()">Check &amp; Continue</button>
     <div id="do-status" class="status"></div>
     <div id="countdown" class="countdown"></div>
@@ -187,7 +194,7 @@
 </div>
 
 <script>
-  // ====== CONFIGURE THESE ======
+ // ====== CONFIGURE THESE ======
   const SUPABASE_URL = "https://npaikbbvarcsxykmogeo.supabase.co";
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wYWlrYmJ2YXJjc3h5a21vZ2VvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzNTcxNzIsImV4cCI6MjA5OTkzMzE3Mn0.zwIfRfHttsYmATkl751GWa1VJE2qUgN5Jxq53tNYSpM";
   // ==============================
@@ -198,6 +205,23 @@
   let currentLocation = null;
   let currentDoNumber = null;
   let countdownTimer = null;
+  let locationChannel = null;
+
+  // Keeps currentLocation in sync with admin edits (start/end time,
+  // draw count) made mid-event, without requiring the volunteer to
+  // log out and back in. Previously this was fetched once at login
+  // and never refreshed, so a countdown could keep showing a stale
+  // start_time indefinitely.
+  function subscribeLocationRealtime() {
+    if (locationChannel || !currentLocation) return;
+    locationChannel = sb
+      .channel('volunteer-location-live')
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'locations', filter: `id=eq.${currentLocation.id}` },
+        (payload) => { currentLocation = payload.new; }
+      )
+      .subscribe();
+  }
 
   async function doLogin() {
     const email = document.getElementById('login-email').value.trim();
@@ -224,11 +248,13 @@
 
     currentProfile = profile;
     currentLocation = profile.locations;
+    subscribeLocationRealtime();
     showDoScreen();
   }
 
   async function doLogout() {
     if (countdownTimer) clearInterval(countdownTimer);
+    if (locationChannel) { await sb.removeChannel(locationChannel); locationChannel = null; }
     await sb.auth.signOut();
     location.reload();
   }
@@ -285,14 +311,27 @@
     countdownTimer = setInterval(tick, 1000);
   }
 
+  // Accepts "42", "0042", or "DO0042" and normalizes all of them to
+  // the same padded format the database stores. Padding width is 4
+  // digits (DO0001 .. DO9999) — bump DIGIT_WIDTH if you expect over
+  // 9999 registrations at a single location.
+  const DO_DIGIT_WIDTH = 4;
+  function normalizeDoNumber(input) {
+    const raw = input.trim().toUpperCase();
+    const digitsOnly = raw.replace(/^DO/, '');
+    if (!/^\d+$/.test(digitsOnly)) return null; // not a plain number, not a DO+number — reject
+    return 'DO' + digitsOnly.padStart(DO_DIGIT_WIDTH, '0');
+  }
+
   async function submitDoNumber() {
-    const raw = document.getElementById('do-number').value.trim().toUpperCase();
+    const typed = document.getElementById('do-number').value;
+    const raw = normalizeDoNumber(typed);
     const statusEl = document.getElementById('do-status');
     statusEl.className = 'status'; statusEl.textContent = '';
 
     if (!raw) {
       statusEl.className = 'status err';
-      statusEl.textContent = 'Enter a DO number.';
+      statusEl.textContent = 'Enter a valid DO number (e.g. 42 or DO0042).';
       return;
     }
 
@@ -408,6 +447,7 @@
       if (profile && profile.role === 'volunteer' && profile.location_id) {
         currentProfile = profile;
         currentLocation = profile.locations;
+        subscribeLocationRealtime();
         showDoScreen();
       }
     }
