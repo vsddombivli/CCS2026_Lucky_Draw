@@ -332,12 +332,18 @@
     // Plain column update — safe to call any time, including
     // mid-event. No regeneration step: the next claim_lucky_draw
     // call recalculates odds from whatever is saved here.
-    const { error } = await sb.from('locations').update({
+    const { data: updatedRows, error } = await sb.from('locations').update({
       lucky_draw_count: count,
       expected_total_claims: expected,
       start_time: start ? new Date(start).toISOString() : null,
       end_time: end ? new Date(end).toISOString() : null
-    }).eq('id', id);
+    }).eq('id', id).select();
+
+    if (!error && (!updatedRows || updatedRows.length === 0)) {
+      statusEl.className = 'status err';
+      statusEl.textContent = 'Update matched 0 rows — most likely your admin profile/role check is failing RLS. This is NOT the same as a successful save even though no error was thrown.';
+      return;
+    }
 
     if (error) {
       statusEl.className = 'status err';
@@ -356,7 +362,9 @@
       ...cached,
       id,
       lucky_draw_count: count,
-      expected_total_claims: expected
+      expected_total_claims: expected,
+      start_time: start ? new Date(start).toISOString() : null,
+      end_time: end ? new Date(end).toISOString() : null
     });
   }
 
