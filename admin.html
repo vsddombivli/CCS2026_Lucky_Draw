@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin - Choviyar Lucky Draw</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/supabase-js/2.45.4/supabase.min.js"></script>
+<style>
+  :root {
+    --primary: #b5401f;
+    --primary-dark: #8a2f16;
+    --bg: #fdf6ee;
+    --card: #ffffff;
+    --border: #e5d9c8;
+    --text: #2c2420;
+    --muted: #7a6f63;
+    --danger: #c0392b;
+    --success: #2e7d32;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--bg); color: var(--text); padding: 20px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { color: var(--primary-dark); font-size: 22px; margin-bottom: 4px; }
+  .sub { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; margin-bottom: 16px;
+  }
+  label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 4px; margin-top: 12px; }
+  input, button {
+    font-size: 15px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
+    width: 100%;
+  }
+  button {
+    background: var(--primary); color: white; border: none; cursor: pointer;
+    font-weight: 600; margin-top: 14px; transition: background 0.15s;
+  }
+  button:hover { background: var(--primary-dark); }
+  button.secondary { background: white; color: var(--primary); border: 1px solid var(--primary); }
+  button.secondary:hover { background: #fbeee7; }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  .status { font-size: 13px; padding: 8px 10px; border-radius: 8px; margin-top: 10px; display: none; }
+  .status.ok { background: #e8f5e9; color: var(--success); display: block; }
+  .status.err { background: #fdecea; color: var(--danger); display: block; }
+  #login-screen { max-width: 380px; margin: 80px auto; }
+  .hidden { display: none; }
+  .logout-bar { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .logout-bar button { width: auto; padding: 8px 16px; font-size: 13px; }
+  .slot-count { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .live-dot { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 12px; }
+  .live-dot.ok { color: var(--success); background: #e8f5e9; }
+  .live-dot.err { color: var(--danger); background: #fdecea; }
+  @keyframes cardFlash { 0% { box-shadow: 0 0 0 3px rgba(181,64,31,0.5); } 100% { box-shadow: none; } }
+  .card.flash { animation: cardFlash 0.6s ease-out; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- LOGIN -->
+  <div id="login-screen" class="card">
+    <h1>Admin Login</h1>
+    <p class="sub">Choviyar Lucky Draw Setup</p>
+    <label>Email</label>
+    <input id="login-email" type="email" placeholder="admin@example.com" />
+    <label>Password</label>
+    <input id="login-password" type="password" placeholder="••••••••" />
+    <button onclick="doLogin()">Log In</button>
+    <div id="login-status" class="status"></div>
+  </div>
+
+  <!-- ADMIN DASHBOARD -->
+  <div id="admin-screen" class="hidden">
+    <div class="logout-bar">
+      <span id="live-status" class="live-dot">● Connecting…</span>
+      <button class="secondary" onclick="doLogout()">Log Out</button>
+    </div>
+    <h1>Lucky Draw Setup</h1>
+    <p class="sub">Set prize target, expected claims, and time window per location. Odds recalculate live on every claim — no generation step, and you can edit these numbers mid-event.</p>
+
+    <div class="card">
+      <h3 style="margin-top:0">Add Location</h3>
+      <label>Location Name</label>
+      <input id="new-loc-name" placeholder="e.g. SMPT" />
+      <button onclick="addLocation()">Add Location</button>
+      <div id="add-loc-status" class="status"></div>
+    </div>
+
+    <div id="locations-list"></div>
+  </div>
+
+</div>
+
+<script>
+  // ====== CONFIGURE THESE ======
+  const SUPABASE_URL = "YOUR_SUPABASE_URL";
+  const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+  // ==============================
+
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const locationCache = {}; // id -> latest known location row, kept in sync by realtime
+  let realtimeChannel = null;
+
+  async function doLogin() {
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    const statusEl = document.getElementById('login-status');
+    statusEl.className = 'status'; statusEl.textContent = '';
+
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) {
+      statusEl.className = 'status err';
+      statusEl.textContent = error.message;
+      return;
+    }
+    const profile = await getProfile(data.user.id);
+    if (!profile || profile.role !== 'admin') {
+      statusEl.className = 'status err';
+      statusEl.textContent = 'This login is not an admin account.';
+      await sb.auth.signOut();
+      return;
+    }
+    showAdmin();
+  }
+
+  async function getProfile(userId) {
+    const { data, error } = await sb.from('profiles').select('*').eq('id', userId).single();
+    if (error) return null;
+    return data;
+  }
+
+  async function doLogout() {
+    if (realtimeChannel) await sb.removeChannel(realtimeChannel);
+    await sb.auth.signOut();
+    location.reload();
+  }
+
+  async function showAdmin() {
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('admin-screen').classList.remove('hidden');
+    await loadLocations();
+    subscribeRealtime();
+  }
+
+  // Subscribes once to ALL location row updates (every claim anywhere
+  // touches its location's row). On each update, patch just the
+  // read-only spans for that location — never touch the input fields,
+  // so an admin mid-edit on Prize Target etc. never gets overwritten.
+  function subscribeRealtime() {
+    if (realtimeChannel) return; // already subscribed
+    realtimeChannel = sb
+      .channel('admin-locations-live')
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'locations' },
+        (payload) => applyLiveUpdate(payload.new)
+      )
+      .subscribe((status) => setLiveStatus(status));
+  }
+
+  function applyLiveUpdate(loc) {
+    // Ignore updates for locations not currently rendered (e.g. stale tab)
+    if (!document.getElementById(`loc-card-${loc.id}`)) return;
+    locationCache[loc.id] = loc;
+
+    const remaining = Math.max(loc.lucky_draw_count - loc.prizes_awarded, 0);
+    setText(`claims-${loc.id}`, loc.claims_so_far);
+    setText(`awarded-${loc.id}`, loc.prizes_awarded);
+    setText(`target-${loc.id}`, loc.lucky_draw_count);
+    setText(`remaining-${loc.id}`, remaining);
+    setText(`odds-${loc.id}`, computeLiveOdds(loc));
+
+    // briefly flash the card so the admin notices which location just moved
+    const card = document.getElementById(`loc-card-${loc.id}`);
+    card.classList.add('flash');
+    setTimeout(() => card.classList.remove('flash'), 600);
+  }
+
+  function setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+  }
+
+  function setLiveStatus(status) {
+    const el = document.getElementById('live-status');
+    if (!el) return;
+    if (status === 'SUBSCRIBED') {
+      el.textContent = '● Live';
+      el.className = 'live-dot ok';
+    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+      el.textContent = '● Disconnected — refresh page';
+      el.className = 'live-dot err';
+    } else {
+      el.textContent = '● Connecting…';
+      el.className = 'live-dot';
+    }
+  }
+
+  async function addLocation() {
+    const name = document.getElementById('new-loc-name').value.trim();
+    const statusEl = document.getElementById('add-loc-status');
+    statusEl.className = 'status'; statusEl.textContent = '';
+    if (!name) return;
+    const { error } = await sb.from('locations').insert({ name });
+    if (error) {
+      statusEl.className = 'status err';
+      statusEl.textContent = error.message;
+      return;
+    }
+    document.getElementById('new-loc-name').value = '';
+    statusEl.className = 'status ok';
+    statusEl.textContent = 'Location added.';
+    await loadLocations();
+  }
+
+  async function loadLocations() {
+    const { data: locations, error } = await sb.from('locations').select('*').order('name');
+    const container = document.getElementById('locations-list');
+    container.innerHTML = '';
+    if (error) {
+      container.innerHTML = '<div class="status err">' + error.message + '</div>';
+      return;
+    }
+
+    for (const loc of locations) {
+      const remaining = Math.max(loc.lucky_draw_count - loc.prizes_awarded, 0);
+      const div = document.createElement('div');
+      div.className = 'card';
+      div.id = `loc-card-${loc.id}`;
+      div.innerHTML = `
+        <h3 style="margin-top:0">${escapeHtml(loc.name)}</h3>
+        <div class="row">
+          <div>
+            <label>Prize Target (lucky draws)</label>
+            <input type="number" min="0" id="count-${loc.id}" value="${loc.lucky_draw_count}" />
+          </div>
+          <div>
+            <label>Expected Total Claims</label>
+            <input type="number" min="0" id="expected-${loc.id}" value="${loc.expected_total_claims}" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Start Time</label>
+            <input type="datetime-local" id="start-${loc.id}" value="${toLocalInput(loc.start_time)}" />
+          </div>
+          <div>
+            <label>End Time</label>
+            <input type="datetime-local" id="end-${loc.id}" value="${toLocalInput(loc.end_time)}" />
+          </div>
+        </div>
+        <button onclick="saveLocation('${loc.id}')">Save Settings</button>
+        <div class="slot-count">
+          Claims so far: <span id="claims-${loc.id}">${loc.claims_so_far}</span> &nbsp;|&nbsp;
+          Prizes awarded: <span id="awarded-${loc.id}">${loc.prizes_awarded}</span> / <span id="target-${loc.id}">${loc.lucky_draw_count}</span> &nbsp;|&nbsp;
+          Prizes remaining: <span id="remaining-${loc.id}">${remaining}</span>
+        </div>
+        <div class="slot-count" style="margin-top:2px;">
+          Live win odds right now: <span id="odds-${loc.id}">${computeLiveOdds(loc)}</span>
+        </div>
+        <div id="loc-status-${loc.id}" class="status"></div>
+      `;
+      container.appendChild(div);
+      locationCache[loc.id] = loc;
+    }
+  }
+
+  async function saveLocation(id) {
+    const count = parseInt(document.getElementById(`count-${id}`).value, 10) || 0;
+    const expected = parseInt(document.getElementById(`expected-${id}`).value, 10) || 0;
+    const start = document.getElementById(`start-${id}`).value;
+    const end = document.getElementById(`end-${id}`).value;
+    const statusEl = document.getElementById(`loc-status-${id}`);
+    statusEl.className = 'status'; statusEl.textContent = '';
+
+    // Plain column update — safe to call any time, including
+    // mid-event. No regeneration step: the next claim_lucky_draw
+    // call recalculates odds from whatever is saved here.
+    const { error } = await sb.from('locations').update({
+      lucky_draw_count: count,
+      expected_total_claims: expected,
+      start_time: start ? new Date(start).toISOString() : null,
+      end_time: end ? new Date(end).toISOString() : null
+    }).eq('id', id);
+
+    if (error) {
+      statusEl.className = 'status err';
+      statusEl.textContent = error.message;
+      return;
+    }
+    statusEl.className = 'status ok';
+    statusEl.textContent = 'Saved. Odds update automatically on the next claim — no further action needed.';
+
+    // Patch just this card's counters from what we know locally,
+    // rather than calling loadLocations() and re-rendering every
+    // card (which would blow away unsaved edits an admin might have
+    // mid-typed into a different location's fields).
+    const cached = locationCache[id] || {};
+    applyLiveUpdate({
+      ...cached,
+      id,
+      lucky_draw_count: count,
+      expected_total_claims: expected
+    });
+  }
+
+  // Mirrors the odds formula inside claim_lucky_draw, for display only.
+  // Purely informational — the database is the source of truth.
+  function computeLiveOdds(loc) {
+    const remainingPrizes = Math.max(loc.lucky_draw_count - loc.prizes_awarded, 0);
+    if (remainingPrizes <= 0) return '0% (all prizes awarded)';
+    const remainingExpected = Math.max(loc.expected_total_claims - loc.claims_so_far, remainingPrizes);
+    const p = Math.min(remainingPrizes / remainingExpected, 1);
+    return (p * 100).toFixed(1) + '%';
+  }
+
+  function toLocalInput(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // auto-login check on load
+  (async () => {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) {
+      const profile = await getProfile(session.user.id);
+      if (profile && profile.role === 'admin') {
+        showAdmin();
+      }
+    }
+  })();
+</script>
+
+</body>
+</html>

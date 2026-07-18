@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Choviyar Lucky Draw</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/supabase-js/2.45.4/supabase.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Poppins:wght@400;500;600;700&display=swap');
+
+  :root {
+    --primary: #b5401f;
+    --primary-dark: #8a2f16;
+    --card: #2a1a12;
+    --border: #d9a444;
+    --text: #fdf3e2;
+    --muted: #d8c3a8;
+    --danger: #ff6b5e;
+    --success: #7fdb8a;
+    --gold: #f0c05a;
+    --gold-dark: #c8962a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; min-height: 100%; font-family: 'Poppins', -apple-system, Segoe UI, Roboto, sans-serif;
+    color: var(--text);
+  }
+  body {
+    background-image:
+      linear-gradient(180deg, rgba(8,10,26,0.55) 0%, rgba(20,10,10,0.45) 45%, rgba(10,6,6,0.82) 100%),
+      url('bg.png');
+    background-size: cover;
+    background-position: center top;
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+  }
+  .screen {
+    min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: flex-end; padding: 20px;
+    padding-bottom: 8vh;
+  }
+  .hidden { display: none !important; }
+  .card {
+    background: linear-gradient(160deg, rgba(42,26,18,0.88), rgba(26,15,10,0.92));
+    border: 2px solid var(--border);
+    border-radius: 20px;
+    padding: 30px 26px;
+    max-width: 400px; width: 100%; text-align: center;
+    box-shadow: 0 0 0 1px rgba(240,192,90,0.15), 0 10px 40px rgba(0,0,0,0.55), 0 0 30px rgba(200,150,42,0.25);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    position: relative;
+  }
+  .card::before {
+    content: '✨';
+    position: absolute; top: -18px; left: 50%; transform: translateX(-50%);
+    font-size: 22px;
+  }
+  h1 {
+    font-family: 'Baloo 2', 'Poppins', sans-serif;
+    color: var(--gold);
+    font-size: 26px; margin: 6px 0 4px; letter-spacing: 0.5px;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
+  label { font-size: 13px; color: var(--muted); display: block; margin: 14px 0 4px; text-align: left; font-weight: 500; }
+  input {
+    font-size: 18px; padding: 12px; border-radius: 10px;
+    border: 1px solid var(--gold-dark);
+    background: rgba(255,247,232,0.95);
+    color: #2c2420;
+    width: 100%; text-align: center; letter-spacing: 1px;
+    font-family: 'Poppins', sans-serif;
+  }
+  input:focus {
+    outline: none; border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(240,192,90,0.3);
+  }
+  button {
+    background: linear-gradient(180deg, #e8ae4c, var(--primary));
+    color: #fff8ec; border: none; cursor: pointer;
+    font-weight: 700; margin-top: 16px; padding: 13px; border-radius: 10px;
+    font-size: 16px; width: 100%; transition: transform 0.12s, box-shadow 0.15s;
+    font-family: 'Baloo 2', sans-serif; letter-spacing: 0.3px;
+    box-shadow: 0 4px 14px rgba(181,64,31,0.45);
+  }
+  button:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(181,64,31,0.55); }
+  button:disabled { background: #6b6258; cursor: not-allowed; box-shadow: none; transform: none; }
+  button.link {
+    background: none; color: var(--muted); font-weight: 400; font-size: 13px;
+    text-decoration: underline; margin-top: 10px; box-shadow: none; width: auto;
+  }
+  button.link:hover { transform: none; color: var(--gold); }
+  .status { font-size: 14px; padding: 10px; border-radius: 8px; margin-top: 14px; display: none; }
+  .status.ok { background: rgba(127,219,138,0.15); color: var(--success); display: block; border: 1px solid rgba(127,219,138,0.35); }
+  .status.err { background: rgba(255,107,94,0.15); color: var(--danger); display: block; border: 1px solid rgba(255,107,94,0.35); }
+  .top-bar {
+    position: fixed; top: 0; left: 0; right: 0; display: flex;
+    justify-content: space-between; align-items: center; padding: 16px 18px;
+    z-index: 5;
+  }
+  .location-badge {
+    background: linear-gradient(180deg, var(--gold), var(--gold-dark));
+    color: #3a2410; font-size: 13px;
+    padding: 7px 16px; border-radius: 20px; font-weight: 700;
+    font-family: 'Baloo 2', sans-serif;
+    box-shadow: 0 3px 10px rgba(0,0,0,0.35);
+  }
+  .logout-btn {
+    background: rgba(20,12,8,0.7); color: var(--gold); border: 1px solid var(--gold-dark);
+    font-size: 13px; padding: 7px 16px; border-radius: 20px; width: auto; margin: 0;
+    box-shadow: none; font-family: 'Poppins', sans-serif; font-weight: 600;
+  }
+  .logout-btn:hover { transform: none; background: rgba(20,12,8,0.9); }
+  .countdown {
+    font-size: 13px; color: var(--muted); margin-top: 10px;
+  }
+  .countdown.closed { color: var(--danger); font-weight: 600; }
+
+  /* Gift box screen */
+  #giftbox-screen .card { max-width: 340px; }
+  .gift-box {
+    font-size: 100px; cursor: pointer; user-select: none;
+    transition: transform 0.15s;
+    animation: bob 1.6s ease-in-out infinite;
+    filter: drop-shadow(0 0 18px rgba(240,192,90,0.5));
+  }
+  .gift-box:active { transform: scale(0.92); }
+  @keyframes bob {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  .gift-box.opened { animation: none; }
+  .reveal { font-family: 'Baloo 2', sans-serif; font-size: 22px; font-weight: 700; margin-top: 16px; }
+  .reveal.win { color: var(--gold); text-shadow: 0 0 16px rgba(240,192,90,0.6); }
+  .reveal.lose { color: var(--muted); }
+  .reveal-emoji { font-size: 56px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<!-- LOGIN SCREEN -->
+<div id="login-screen" class="screen">
+  <div class="card">
+    <h1>Volunteer Login</h1>
+    <p class="sub">Choviyar Lucky Draw</p>
+    <label>Email</label>
+    <input id="login-email" type="email" placeholder="volunteer@example.com" />
+    <label>Password</label>
+    <input id="login-password" type="password" placeholder="••••••••" />
+    <button onclick="doLogin()">Log In</button>
+    <div id="login-status" class="status"></div>
+  </div>
+</div>
+
+<!-- DO INPUT SCREEN -->
+<div id="do-screen" class="screen hidden">
+  <div class="top-bar">
+    <span id="location-badge" class="location-badge"></span>
+    <button class="logout-btn" onclick="doLogout()">Log Out</button>
+  </div>
+  <div class="card">
+    <h1>Enter DO Number</h1>
+    <p class="sub">Type the registration number to check eligibility</p>
+    <input id="do-number" type="text" placeholder="e.g. DO0042" autocomplete="off" />
+    <button id="do-submit-btn" onclick="submitDoNumber()">Check &amp; Continue</button>
+    <div id="do-status" class="status"></div>
+    <div id="countdown" class="countdown"></div>
+  </div>
+</div>
+
+<!-- GIFT BOX SCREEN -->
+<div id="giftbox-screen" class="screen hidden">
+  <div class="top-bar">
+    <span id="location-badge-2" class="location-badge"></span>
+    <button class="logout-btn" onclick="doLogout()">Log Out</button>
+  </div>
+  <div class="card">
+    <h1 id="giftbox-do-label">DO0042</h1>
+    <p class="sub">Tap the gift box!</p>
+    <div id="gift-box" class="gift-box" onclick="openGiftBox()">🎁</div>
+    <div id="reveal-area"></div>
+    <div id="giftbox-status" class="status"></div>
+    <button id="try-another-btn" class="link hidden" onclick="resetToDoScreen()">Enter another DO number</button>
+  </div>
+</div>
+
+<script>
+  // ====== CONFIGURE THESE ======
+  const SUPABASE_URL = "YOUR_SUPABASE_URL";
+  const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+  // ==============================
+
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  let currentProfile = null;
+  let currentLocation = null;
+  let currentDoNumber = null;
+  let countdownTimer = null;
+
+  async function doLogin() {
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    const statusEl = document.getElementById('login-status');
+    statusEl.className = 'status'; statusEl.textContent = '';
+
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) {
+      statusEl.className = 'status err';
+      statusEl.textContent = error.message;
+      return;
+    }
+
+    const { data: profile, error: profileErr } = await sb
+      .from('profiles').select('*, locations(*)').eq('id', data.user.id).single();
+
+    if (profileErr || !profile || profile.role !== 'volunteer' || !profile.location_id) {
+      statusEl.className = 'status err';
+      statusEl.textContent = 'This login is not a volunteer account with an assigned location.';
+      await sb.auth.signOut();
+      return;
+    }
+
+    currentProfile = profile;
+    currentLocation = profile.locations;
+    showDoScreen();
+  }
+
+  async function doLogout() {
+    if (countdownTimer) clearInterval(countdownTimer);
+    await sb.auth.signOut();
+    location.reload();
+  }
+
+  function showDoScreen() {
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('giftbox-screen').classList.add('hidden');
+    document.getElementById('do-screen').classList.remove('hidden');
+    document.getElementById('location-badge').textContent = currentLocation.name;
+    document.getElementById('do-number').value = '';
+    document.getElementById('do-status').className = 'status';
+    document.getElementById('do-status').textContent = '';
+    document.getElementById('do-number').focus();
+    startCountdown();
+  }
+
+  function startCountdown() {
+    if (countdownTimer) clearInterval(countdownTimer);
+    const el = document.getElementById('countdown');
+    const submitBtn = document.getElementById('do-submit-btn');
+
+    function tick() {
+      const now = new Date();
+      const end = currentLocation.end_time ? new Date(currentLocation.end_time) : null;
+      const start = currentLocation.start_time ? new Date(currentLocation.start_time) : null;
+
+      if (!start || !end) {
+        el.textContent = 'No draw window set for this location yet.';
+        el.className = 'countdown closed';
+        submitBtn.disabled = true;
+        return;
+      }
+      if (now < start) {
+        el.textContent = 'Draw window starts at ' + start.toLocaleTimeString();
+        el.className = 'countdown';
+        submitBtn.disabled = true;
+        return;
+      }
+      if (now > end) {
+        el.textContent = 'Draw window closed at ' + end.toLocaleTimeString();
+        el.className = 'countdown closed';
+        submitBtn.disabled = true;
+        clearInterval(countdownTimer);
+        return;
+      }
+      const remainingMs = end - now;
+      const mins = Math.floor(remainingMs / 60000);
+      const secs = Math.floor((remainingMs % 60000) / 1000);
+      el.textContent = `Time remaining: ${mins}m ${secs}s`;
+      el.className = 'countdown';
+      submitBtn.disabled = false;
+    }
+    tick();
+    countdownTimer = setInterval(tick, 1000);
+  }
+
+  async function submitDoNumber() {
+    const raw = document.getElementById('do-number').value.trim().toUpperCase();
+    const statusEl = document.getElementById('do-status');
+    statusEl.className = 'status'; statusEl.textContent = '';
+
+    if (!raw) {
+      statusEl.className = 'status err';
+      statusEl.textContent = 'Enter a DO number.';
+      return;
+    }
+
+    const btn = document.getElementById('do-submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Checking...';
+
+    // Read-only check. Safe to retry on network failure — nothing
+    // is written here.
+    const { data, error } = await sb.rpc('check_do_status', { p_do_number: raw });
+
+    btn.disabled = false;
+    btn.textContent = 'Check & Continue';
+
+    if (error) {
+      statusEl.className = 'status err';
+      statusEl.textContent = 'Network/server error — please try again: ' + error.message;
+      return;
+    }
+
+    const result = data && data[0];
+    if (!result) {
+      statusEl.className = 'status err';
+      statusEl.textContent = 'Unexpected response — please try again.';
+      return;
+    }
+
+    if (result.status === 'blocked') {
+      statusEl.className = 'status err';
+      statusEl.textContent = result.message;
+      return;
+    }
+
+    currentDoNumber = raw;
+    showGiftBox();
+  }
+
+  function showGiftBox() {
+    document.getElementById('do-screen').classList.add('hidden');
+    document.getElementById('giftbox-screen').classList.remove('hidden');
+    document.getElementById('location-badge-2').textContent = currentLocation.name;
+    document.getElementById('giftbox-do-label').textContent = currentDoNumber;
+    document.getElementById('gift-box').textContent = '🎁';
+    document.getElementById('gift-box').classList.remove('opened');
+    document.getElementById('gift-box').style.pointerEvents = 'auto';
+    document.getElementById('reveal-area').innerHTML = '';
+    document.getElementById('giftbox-status').className = 'status';
+    document.getElementById('giftbox-status').textContent = '';
+    document.getElementById('try-another-btn').classList.add('hidden');
+  }
+
+  async function openGiftBox() {
+    const box = document.getElementById('gift-box');
+    const statusEl = document.getElementById('giftbox-status');
+    box.style.pointerEvents = 'none'; // prevent double-click during the call
+    statusEl.className = 'status'; statusEl.textContent = '';
+
+    // This is the ONLY moment the DO number gets locked in the
+    // backend — the win/lose result and the lock happen together,
+    // atomically, right here.
+    const { data, error } = await sb.rpc('claim_lucky_draw', { p_do_number: currentDoNumber });
+
+    if (error) {
+      statusEl.className = 'status err';
+      statusEl.textContent = 'Could not complete — tap the box again to retry: ' + error.message;
+      box.style.pointerEvents = 'auto';
+      return;
+    }
+
+    const result = data && data[0];
+    if (!result) {
+      statusEl.className = 'status err';
+      statusEl.textContent = 'Unexpected response — tap the box again to retry.';
+      box.style.pointerEvents = 'auto';
+      return;
+    }
+
+    box.classList.add('opened');
+    box.textContent = '📦';
+
+    const revealArea = document.getElementById('reveal-area');
+    if (result.result === 'win') {
+      revealArea.innerHTML = `
+        <div class="reveal-emoji">🎉</div>
+        <div class="reveal win">JACKPOT!</div>
+      `;
+    } else if (result.result === 'lose') {
+      revealArea.innerHTML = `
+        <div class="reveal-emoji">🙂</div>
+        <div class="reveal lose">Better luck next time</div>
+      `;
+    } else {
+      // race condition: someone else claimed this DO number between
+      // the earlier check and this click
+      statusEl.className = 'status err';
+      statusEl.textContent = result.message;
+    }
+
+    document.getElementById('try-another-btn').classList.remove('hidden');
+  }
+
+  function resetToDoScreen() {
+    currentDoNumber = null;
+    showDoScreen();
+  }
+
+  // auto-login check on load
+  (async () => {
+    const { data: { session } } = await sb.auth.getSession();
+    if (session) {
+      const { data: profile } = await sb
+        .from('profiles').select('*, locations(*)').eq('id', session.user.id).single();
+      if (profile && profile.role === 'volunteer' && profile.location_id) {
+        currentProfile = profile;
+        currentLocation = profile.locations;
+        showDoScreen();
+      }
+    }
+  })();
+</script>
+
+</body>
+</html>
