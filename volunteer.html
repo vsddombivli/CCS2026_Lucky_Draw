@@ -285,7 +285,11 @@
     refetchTimer = setInterval(async () => {
       if (!currentLocation) return;
       const { data, error } = await sb.from('locations').select('*').eq('id', currentLocation.id).single();
-      if (!error && data) currentLocation = data;
+      if (error) {
+        console.error('Location refetch failed — check that this volunteer profile\'s location_id matches the row you are editing in admin:', error);
+        return;
+      }
+      currentLocation = data;
     }, 15000);
     const el = document.getElementById('countdown');
     const submitBtn = document.getElementById('do-submit-btn');
@@ -302,7 +306,7 @@
         return;
       }
       if (now < start) {
-        el.textContent = 'Draw window starts at ' + start.toLocaleTimeString();
+        el.textContent = 'Draw window closed at ' + end.toLocaleTimeString();
         el.className = 'countdown';
         submitBtn.disabled = true;
         return;
