@@ -503,7 +503,9 @@
     for (let n = 1; n <= currentMaster.max_do_number; n++) {
       const result = resultByNumber[n];
       const cls = result === 'win' ? 'win' : result === 'lose' ? 'lose' : '';
-      html += `<div class="do-cell ${cls}">${n}</div>`;
+      const doNumber = currentMaster.do_prefix + String(n).padStart(4, '0');
+      const clickable = result ? ` onclick="resetDoNumber('${doNumber}', ${n})" style="cursor:pointer"` : '';
+      html += `<div class="do-cell ${cls}"${clickable}>${n}</div>`;
     }
     gridEl.innerHTML = html;
   }
@@ -511,6 +513,29 @@
   function hideDoGrid() {
     document.getElementById('do-grid-screen').classList.add('hidden');
     document.getElementById('admin-screen').classList.remove('hidden');
+  }
+
+  async function resetDoNumber(doNumber, n) {
+    if (!confirm(`Reset ${doNumber} back to "not attempted"? This deletes its result permanently.`)) {
+      return;
+    }
+    const { data, error } = await sb.rpc('reset_participation', { p_do_number: doNumber });
+    if (error) {
+      alert('Reset failed: ' + error.message);
+      return;
+    }
+    const result = data && data[0];
+    if (result && result.status !== 'ok') {
+      alert(result.message);
+      return;
+    }
+    const cells = document.querySelectorAll('#do-grid .do-cell');
+    const cell = cells[n - 1];
+    if (cell) {
+      cell.className = 'do-cell';
+      cell.removeAttribute('onclick');
+      cell.style.cursor = '';
+    }
   }
 
   function toLocalInput(iso) {
